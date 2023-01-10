@@ -47,7 +47,7 @@ X86_SIMPLE_EXECUTION_CLAUSES: Dict[str, Type[x86_model.X86UnicornModel]] = {
     "nullinj-term": x86_model.X86UnicornNullTerminating,
     "ooo": x86_model.X86UnicornOOO,
     "vspec-unknown": x86_model.X86UnicornVSPECUnknown,
-    "bottom": x86_model.X86UnicornBottom,
+    "bottom": x86_model.X86Bottom,
     "div-zero": x86_model.X86UnicornDivZero,
     "div-overflow": x86_model.X86UnicornDivOverflow,
     "meltdown": x86_model.X86Meltdown,

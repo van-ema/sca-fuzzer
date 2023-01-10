@@ -542,46 +542,51 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         assert(len(self.whole_memory_tainted_checkpoints) == 0)
         return super()._load_input(input_)
 
-    def speculate_fault(self, errno: int) -> int:
+    def speculate_fault(self, errno: int) -> int:        
         if not self.fault_triggers_speculation(errno):
             return 0
-               
+                   
         # start speculation
         # we set the rollback address to the end of the testcase
         # because faults are terminating execution
         self.checkpoint(self.emulator, self.code_end)
+        
+        # only collect new taints if none of the src operands in the faulting instruction are tainted
+        # if they are, the taints have been propagated already, so just ignore fault
+        # print('already tainted?', self.curr_src_tainted)
+        if not self.curr_src_tainted:
 
-        # collect source and destination operands for initial tainting
-        reg_src_operands = set()
-        # destination operands are global variable to later add value of memory access to taint
-        self.curr_dest_regs = set()
-        
-        for op in self.current_instruction.get_all_operands():
-            if isinstance(op, RegisterOperand):
-                if op.src:
-                    reg_src_operands.add(X86TargetDesc.gpr_normalized[op.value])
-                if op.dest:
-                    self.curr_dest_regs.add(X86TargetDesc.gpr_normalized[op.value])
-            elif isinstance(op, FlagsOperand):
-                reg_src_operands.update(op.get_read_flags())
-                self.curr_dest_regs.update(op.get_write_flags())
-        
-        source_values = set()
-        # if faulting instruction has a memory read, taint with value from memory
-        if self.current_instruction.has_read():
-            address = self.curr_mem_access[0]
-            size = self.curr_mem_access[1]
-            mem_value = self.emulator.mem_read(address, size)
-            source_values.add(int.from_bytes(mem_value, 'little'))
+            # collect source and destination operands for initial tainting
+            src_regs = set()
+            # destination operands are global variable to later add value of memory access to taint
+            self.curr_dest_regs = set()
             
-        for reg in reg_src_operands:
-            reg_id = X86UnicornTargetDesc.reg_decode[reg]
-            reg_value = self.emulator.reg_read(reg_id)
-            source_values.add(reg_value)
-        
-        # taint destination registers with taints
-        for reg in self.curr_dest_regs:
-            self.reg_taints[reg] = source_values
+            for op in self.current_instruction.get_all_operands():
+                if isinstance(op, RegisterOperand):
+                    if op.src:
+                        src_regs.add(X86TargetDesc.gpr_normalized[op.value])
+                    if op.dest:
+                        self.curr_dest_regs.add(X86TargetDesc.gpr_normalized[op.value])
+                elif isinstance(op, FlagsOperand):
+                    src_regs.update(op.get_read_flags())
+                    self.curr_dest_regs.update(op.get_write_flags())
+                                    
+            source_values = set()
+            # if faulting instruction has a memory read, taint with value from memory
+            if self.current_instruction.has_read():
+                address = self.curr_mem_access[0]
+                size = self.curr_mem_access[1]
+                mem_value = self.emulator.mem_read(address, size)
+                source_values.add(int.from_bytes(mem_value, 'little'))
+                
+            for reg in src_regs:
+                reg_id = X86UnicornTargetDesc.reg_decode[reg]
+                reg_value = self.emulator.reg_read(reg_id)
+                source_values.add(reg_value)
+            
+            # taint destination registers with taints
+            for reg in self.curr_dest_regs:
+                self.reg_taints[reg] = source_values        
          
         # speculatively skip the faulting instruction
         if self.next_instruction_addr >= self.code_end:

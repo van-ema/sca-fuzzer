@@ -13,7 +13,7 @@ import unicorn.x86_const as ucc  # type: ignore
 from unicorn import Uc, UC_MEM_WRITE, UC_ARCH_X86, UC_MODE_64, UC_PROT_READ, UC_PROT_NONE
 
 from interfaces import Input, FlagsOperand, RegisterOperand, MemoryOperand, AgenOperand, TestCase
-from model import UnicornModel, UnicornSpec, UnicornSeq, UnicornBpas, BaseTaintTracker
+from model import UnicornModel, UnicornTracer, UnicornSpec, UnicornSeq, UnicornBpas, BaseTaintTracker
 from x86.x86_target_desc import X86UnicornTargetDesc, X86TargetDesc
 from service import UnreachableCode
 
@@ -22,7 +22,11 @@ FLAGS_PF = 0b000000000100
 FLAGS_AF = 0b000000010000
 FLAGS_ZF = 0b000001000000
 FLAGS_SF = 0b000010000000
+FLAGS_TF = 0b000100000000
+FLAGS_IF = 0b001000000000
+FLAGS_DF = 0b010000000000
 FLAGS_OF = 0b100000000000
+
 
 
 class X86UnicornModel(UnicornModel):
@@ -496,7 +500,8 @@ class X86UnicornOOO(X86FaultModelAbstract):
 class X86UnicornVSPECUnknown(X86FaultModelAbstract):
     """
     Contract for value speculation with unknown values
-    """
+    """    
+    
     # taints of registers
     reg_taints: Dict
     reg_taints_checkpoints: List[Dict]
@@ -525,10 +530,9 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         "AF": FLAGS_AF,
         "ZF": FLAGS_ZF,
         "SF": FLAGS_SF,
-        # these flags not in x86?
-        # "TF": FLAGS_TF, 
-        # "IF": FLAGS_IF,
-        # "DF": FLAGS_DF, 
+        "TF": FLAGS_TF, 
+        "IF": FLAGS_IF,
+        "DF": FLAGS_DF, 
         "OF": FLAGS_OF
     } 
 
@@ -581,10 +585,9 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                 reg_value = model.emulator.reg_read(reg_id)
                 # if register is a flag, project flags register on flag
                 if reg in {"CF", "PF", "AF", "ZF", "SF", "TF", "IF", "DF", "OF"}:
-                    assert reg in {"CF", "PF", "AF", "ZF", "SF", "OF"}
                     reg_value = int((reg_value & model.flags_translate[reg]) != 0)
                 pc = model.curr_instruction_addr - model.code_start
-                reg_values.add((pc, reg, reg_value))
+                reg_values.add((pc, reg_id, reg_value))
         
         return(reg_values, reg_values_tainted)
                 
@@ -605,6 +608,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         #   2) current source is not tainted, but destination is tainted,
         #      so update taint of destination with current values of register
         for reg in model.curr_dest_regs:
+            # reg_id = X86UnicornTargetDesc.reg_decode[reg]
             # check if destination reg is already tainted
             if reg in model.reg_taints:
                 # check if reg is a register, not a flag, and whether only lower bits are overwritten
@@ -626,7 +630,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                     reg_id = X86UnicornTargetDesc.reg_decode[reg]
                     reg_value = model.emulator.reg_read(reg_id)
                     pc = model.curr_instruction_addr - model.code_start
-                    new_taint = {(pc, reg, reg_value)} | model.curr_taint
+                    new_taint = {(pc, reg_id, reg_value)} | model.curr_taint
                     X86UnicornVSPECUnknown.set_taint(model, reg, new_taint)
                 # if not, just set current taint as taint of reg
                 else:
@@ -641,8 +645,6 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         # we set the rollback address to the end of the testcase
         # because faults are terminating execution
         self.checkpoint(self.emulator, self.code_end)
-        
-        # print('caught fault.', self.current_instruction, self.reg_taints, self.curr_src_tainted, self.curr_taint)
         
         # only collect new taints if none of the src operands in the faulting instruction are tainted
         # if they are, the taints have been propagated correctly already, so just ignore fault
@@ -683,14 +685,11 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
             # need to set curr_src_tainted to make update_taints call work              
             self.curr_src_tainted = True 
             X86UnicornVSPECUnknown.update_taints(self)    
+            # for reg in self.curr_dest_regs:
+            #     self.reg_taints[reg] = self.curr_taint
             
             # TODO for generalisation from DIV: instruction might have store
             
-        #     assert 'A' in src_regs, f"instruction: {self.current_instruction}, src regs: {src_regs}, reg taints: {self.reg_taints}"
-        
-        # assert self.curr_src_tainted, f"instruction: {self.current_instruction}, current taint: {self.curr_taint}, resulting reg taints: {self.reg_taints}"
-        # assert 'A' in self.curr_dest_regs, f"instruction: {self.current_instruction}, dest regs: {self.curr_dest_regs}, reg taints: {self.reg_taints}"
-        # assert 'A' in self.reg_taints, f"instruction: {self.current_instruction}, dest regs: {self.curr_dest_regs}, reg taints: {self.reg_taints}"
         
         
         # speculatively skip the faulting instruction
@@ -751,8 +750,6 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                         if op.dest:
                             mem_dest_regs.add(normalized)
             elif isinstance(op, FlagsOperand):
-                # print('read flags:', op.get_read_flags())
-                # print('write flags:', op.get_write_flags())
                 src_regs.update(op.get_read_flags())
                 model.curr_dest_regs.update(op.get_write_flags())
             elif isinstance(op, AgenOperand):
@@ -806,6 +803,8 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         model.curr_taint, model.curr_src_tainted = X86UnicornVSPECUnknown.assemble_reg_values(model, src_regs)        
         X86UnicornVSPECUnknown.update_taints(model)
         
+       
+        
             
     @staticmethod
     def trace_mem_access(emulator, access, address, size, value, model) -> None:
@@ -843,7 +842,6 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                 X86UnicornVSPECUnknown.update_taints(model) 
                     
         if access == UC_MEM_WRITE:
-            # print('memory write')
             # check if any src operand was tainted (memory location or register)
             if not model.curr_src_tainted:            
                 # if there is no current taint, remove possible taint from current address range            
@@ -860,11 +858,12 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
             # if current observation contains full architectural state info, then only leak the hash
             if (None, None, model.input_hash) in model.curr_observation:
                 model.curr_observation = {model.input_hash}
-            # print('current observation:', model.curr_observation)
-            observation = frozenset(model.curr_observation)
-            observation_hash = hash(observation)
+            observation_list = list(model.curr_observation)
+            observation_list.sort()
+            observation_hash = hash(tuple(observation_list))
             # just append hash to trace, don't do normal memory access
-            model.tracer.trace.append(observation_hash)
+            assert isinstance(model.tracer, UnicornTracer)
+            model.tracer.add_dependencies_to_trace(address, observation_hash, model)
         # if not, do normal memory access
         else:
             X86FaultModelAbstract.trace_mem_access(emulator, access, address, size, value, model)
@@ -897,7 +896,6 @@ class x86UnicornVSPECUnknownFaulty(X86UnicornVSPECUnknown):
         
     def _load_input(self, input_: Input):
         self.last_faulty_addr = -1
-        print('new input')
         return super()._load_input(input_)
         
         
@@ -909,16 +907,13 @@ class x86UnicornVSPECUnknownFaulty(X86UnicornVSPECUnknown):
         
         # assert self.curr_src_tainted, f"instruction: {self.current_instruction}, current taint: {self.curr_taint}, resulting reg taints: {self.reg_taints}"
         # assert 'A' in self.reg_taints, f"instruction: {self.current_instruction}, current taint: {self.curr_taint}, dest regs: {self.curr_dest_regs}, reg taints: {self.reg_taints}"
-        
+        a_id = X86UnicornTargetDesc.reg_decode['A']
+        d_id = X86UnicornTargetDesc.reg_decode['D']
         if self.last_faulty_addr == -1:
             for reg in self.reg_taints:
-                new_taint = set(filter(lambda x: x[1] != 'A', self.reg_taints[reg]))
+                new_taint = set(filter(lambda x: x[1] != d_id, self.reg_taints[reg]))
                 self.reg_taints[reg] = new_taint
-                
-        # if self.last_faulty_addr == -1:
-        # self.reg_taints.pop('A', None)
-            # print('removed A, new reg taints:', self.reg_taints)
-            
+                            
         self.last_faulty_addr = self.curr_instruction_addr
         
         return next_instruction_address
@@ -936,8 +931,6 @@ class X86Bottom(X86UnicornVSPECUnknown):
     def speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):
             return 0
-        
-        # print('input hash:', self.input_hash)
 
         # start speculation
         # we set the rollback address to the end of the testcase

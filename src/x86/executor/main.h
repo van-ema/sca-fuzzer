@@ -18,6 +18,12 @@
 #define VENDOR_ID 0
 #endif
 
+#if VENDOR_ID == 2
+#ifndef CPU_FAMILY 
+#error "Undefined CPU_FAMILY"
+#endif
+#endif
+
 #ifndef L1D_ASSOCIATIVITY
 #error "Undefined L1D_ASSOCIATIVITY"
 #define L1D_ASSOCIATIVITY 0

@@ -816,9 +816,6 @@ class BaseTaintTracker(TaintTrackerInterface):
         for addr in self.src_mems:
             src_labels.update(self.mem_dependencies.get(addr, {addr}))
 
-        # print(self.src_regs, self.src_flags, self.src_mems)
-        # print(self.dest_regs, self.dest_flags, self.dest_mems)
-
         # Propagate label to all targets
         uniq_labels = src_labels
         for reg in self.dest_regs:
@@ -841,8 +838,6 @@ class BaseTaintTracker(TaintTrackerInterface):
             else:
                 self.mem_dependencies[mem] = copy.copy(uniq_labels)
                 self.mem_dependencies[mem].add(mem)
-                
-        # print(self.reg_dependencies, self.flag_dependencies, self.mem_dependencies)
 
         # Update taints
         for label in self.pending_taint:
@@ -850,9 +845,6 @@ class BaseTaintTracker(TaintTrackerInterface):
                 self.tainted_labels.update(self.mem_dependencies.get(label, {label}))
             else:
                 self.tainted_labels.update(self.reg_dependencies.get(label, {label}))
-
-        # print("Pending taints", self.pending_taint)
-        # print(self.tainted_labels)
 
         self._instruction = None
 
@@ -916,6 +908,7 @@ class BaseTaintTracker(TaintTrackerInterface):
                 # we taint the 64-bits block that contains the address
                 input_offset = (int(label, 16)) // 8
             else:
+                # uncomment if to create violations of vspec-ops-div
                 # if not label == 'D':
                 reg = self.unicorn_target_desc.reg_decode[label]
                 if reg in self._registers:

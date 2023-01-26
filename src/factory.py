@@ -47,6 +47,7 @@ X86_SIMPLE_EXECUTION_CLAUSES: Dict[str, Type[x86_model.X86UnicornModel]] = {
     "nullinj-term": x86_model.X86UnicornNullTerminating,
     "ooo": x86_model.X86UnicornOOO,
     "vspec-ops-div": x86_model.x86UnicornVspecOpsDIV,
+    # contract below only faulty if taint tracking for input generation is altered, see model.py
     "vspec-ops-div-faulty": x86_model.x86UnicornVspecOpsDIVFaulty,
     "vspec-ops-page-faults": x86_model.x86UnicornVpecOpsPageFaults,
     "vspec-all-page-faults": x86_model.X86UnicornVspecAllPageFaults,

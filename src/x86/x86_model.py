@@ -1000,10 +1000,8 @@ class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
             return 0
 
         # start speculation
-        # we set the rollback address to the end of the testcase
-        # because faults are terminating execution
         # store a checkpoint
-        self.checkpoint(self.emulator, self.get_rollback_address())
+        self.checkpoint(self.emulator, self.get_rollback_address())        
         
         # only collect new taints if none of the src operands in the faulting instruction are tainted
         # if they are, the taints have been propagated correctly already, so just ignore fault
@@ -1031,12 +1029,25 @@ class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
             return 0  # no need for speculation if we're at the end
         else:
             return self.next_instruction_addr
+        
+    def rollback(self) -> int:
+        next_instruction = super().rollback()
+        
+        if not self.in_speculation:
+            # remove protection
+            self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
+                                    self.FAULTY_REGION_SIZE)
+        
+        return next_instruction
+        
+
+    def get_rollback_address(self) -> int:        
+        if self.in_speculation:
+            return self.code_end
+        else:
+            return self.curr_instruction_addr
                 
         
-    def get_rollback_address(self) -> int:
-        # TODO: add rollbacks for page faults
-        return self.code_end    
-
 
 class X86UnicornDivZero(X86FaultModelAbstract):
     injected_value: int = 0

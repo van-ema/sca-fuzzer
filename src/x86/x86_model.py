@@ -303,6 +303,7 @@ class X86UnicornNull(X86FaultModelAbstract):
     Contract describing zero injection on faults
     """
     curr_load: Tuple[int, int]
+    pending_re_execution: bool = False
     pending_restore_protection: bool = False
 
     def __init__(self, *args):
@@ -313,7 +314,7 @@ class X86UnicornNull(X86FaultModelAbstract):
     def speculate_instruction(emulator: Uc, address, size, model) -> None:
         assert isinstance(model, X86UnicornNull)
         # restore permissions after speculation - we might have nested injections
-        if address != model.curr_instruction_addr and model.pending_restore_protection:
+        if model.pending_restore_protection:
             model.pending_restore_protection = False
             if model.rw_protect:
                 model.emulator.mem_protect(model.sandbox_base + model.MAIN_REGION_SIZE,
@@ -321,9 +322,11 @@ class X86UnicornNull(X86FaultModelAbstract):
             elif model.write_protect:
                 model.emulator.mem_protect(model.sandbox_base + model.MAIN_REGION_SIZE,
                                            model.FAULTY_REGION_SIZE, UC_PROT_READ)
+        elif model.pending_re_execution:
+            model.pending_re_execution = False
+            model.pending_restore_protection = True
 
         # store the address for checkpointing (see speculate_fault)
-        model.curr_instruction_addr = address
         model.curr_load = (0, 0)
 
     @staticmethod
@@ -350,7 +353,7 @@ class X86UnicornNull(X86FaultModelAbstract):
             self.emulator.mem_write(address, bytes([0 for _ in range(size)]))
 
         # repeat the instruction
-        self.pending_restore_protection = True
+        self.pending_re_execution = True
         self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
                                   self.FAULTY_REGION_SIZE)
         return self.curr_instruction_addr
@@ -466,15 +469,48 @@ class X86UnicornOOO(X86FaultModelAbstract):
         for reg in reg_dest_operands:
             model.dependencies.add(reg)
 
-        # special case - exchange instruction swaps dependencies
-        if "XCHG" in model.current_instruction.name:
-            ops = model.current_instruction.get_reg_operands()
-            if len(ops) == 2:
-                op1, op2 = [X86TargetDesc.gpr_normalized[op.value] for op in ops]
-                if op1 in old_dependencies and op2 not in old_dependencies:
-                    model.dependencies.remove(op1)
-                elif op1 not in old_dependencies and op2 in old_dependencies:
-                    model.dependencies.remove(op2)
+        # special case 1 - cmpxchg does not always taint RAX
+        name = model.current_instruction.name
+        if "CMPXCHG" in name:
+            dest = model.current_instruction.operands[0]
+            if isinstance(dest, MemoryOperand) or \
+               X86TargetDesc.gpr_normalized[dest.value] not in old_dependencies:
+                model.dependencies.remove(X86TargetDesc.gpr_normalized["RAX"])
+                for flag in model.current_instruction.get_flags_operand().get_write_flags():
+                    model.dependencies.remove(flag)
+
+        # special case 2 - exchange instruction swaps dependencies
+        elif "XCHG" in name:
+            assert len(model.current_instruction.operands) == 2
+            op1, op2 = model.current_instruction.operands
+            if isinstance(op1, RegisterOperand):
+                # swap dependencies
+                op1_val, op2_val = [X86TargetDesc.gpr_normalized[op.value] for op in [op1, op2]]
+                if op1_val in old_dependencies and op2_val not in old_dependencies:
+                    model.dependencies.remove(op1_val)
+                elif op1_val not in old_dependencies and op2_val in old_dependencies:
+                    model.dependencies.remove(op2_val)
+            else:
+                # memory is never tainted -> override the src dependency
+                op2_val = X86TargetDesc.gpr_normalized[op2.value]
+                if op2_val in old_dependencies:
+                    model.dependencies.remove(op2_val)
+
+        # special case 3 - XADD overrides the src taint with the dest taint
+        elif "XADD" in name:
+            assert len(model.current_instruction.operands) == 2
+            op1, op2 = model.current_instruction.operands
+            if isinstance(op1, MemoryOperand) or \
+               X86TargetDesc.gpr_normalized[op1.value] not in old_dependencies:
+                model.dependencies.remove(X86TargetDesc.gpr_normalized[op2.value])
+
+        # special case 4 - zeroing and reset patterns
+        elif name in ["SUB", "LOCK SUB", "SBB", "LOCK SBB", "XOR", "LOCK XOR", "CMP"]:
+            assert len(model.current_instruction.operands) == 2
+            op1, op2 = model.current_instruction.operands
+            if op1.value == op2.value:
+                for reg in reg_dest_operands:
+                    model.dependencies.remove(reg)
 
         # special case - many memory operations are implemented as two uops,
         # and one of them could be expected even if the other is data-dependent

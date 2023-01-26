@@ -51,6 +51,8 @@ inline void wrmsr64(unsigned int msr, uint64_t value)
     native_write_msr(msr, (uint32_t)value, (uint32_t)(value >> 32));
 }
 
+inline unsigned long long rdmsr64(unsigned int msr) { return native_read_msr(msr); }
+
 inline void _native_page_invalidate(void)
 {
     asm volatile("invlpg (%0)" ::"r"(faulty_page_addr) : "memory");
@@ -183,6 +185,15 @@ static inline int pre_measurement_setup(void)
 
     // Disable prefetchers
     wrmsr64(0xc0000108, prefetcher_control);
+
+    // Ensure SVM is disabled
+    unsigned long long int msr_efer = rdmsr64(0xc0000080);
+    if (msr_efer & EFER_SVME)
+    {
+        printk(KERN_ERR "x86_executor: ERROR: SVME is on. \nThis testing configuration is not "
+                        "supported by Revizor yet.");
+        return -1;
+    }
 #endif
 
     if (err)
@@ -204,6 +215,8 @@ static inline int uarch_flush(void)
     static const u16 ds = __KERNEL_DS;
     asm volatile("verw %[ds]" : : [ds] "m"(ds) : "cc");
     wrmsr64(MSR_IA32_FLUSH_CMD, L1D_FLUSH);
+    asm volatile("wbinvd\n" : : :);
+    asm volatile("lfence\n" : : :);
 #elif VENDOR_ID == 2 // AMD
     // TBD
 #endif
@@ -275,10 +288,6 @@ void run_experiment(long rounds)
         // - RSP and RBP
         ((uint64_t *)register_initialization_base)[7] = (uint64_t)stack_base;
 
-        // flush some of the uarch state
-        if (pre_run_flush == 1)
-            uarch_flush();
-
         // Set page table entry for the faulty region
         if ((faulty_pte_mask_set != 0) || (faulty_pte_mask_clear != 0xffffffffffffffff))
         {
@@ -287,12 +296,16 @@ void run_experiment(long rounds)
             set_pte_at(current->mm, faulty_page_addr, faulty_page_ptep, faulty_page_pte);
             // When testing for #PF flushing the faulty page causes a 'soft
             // lookup' kernel error on certain CPUs.
-            //asm volatile("clflush (%0)\nlfence\n" ::"r"(faulty_page_addr)
+            // asm volatile("clflush (%0)\nlfence\n" ::"r"(faulty_page_addr)
             // : "memory");
             _native_page_invalidate();
         }
 
         setup_idt();
+
+        // flush some of the uarch state
+        if (pre_run_flush == 1)
+            uarch_flush();
 
         // execute
         ((void (*)(char *))measurement_code)(&sandbox->main_region[0]);

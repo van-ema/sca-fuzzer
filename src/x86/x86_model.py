@@ -499,9 +499,10 @@ class X86UnicornOOO(X86FaultModelAbstract):
         return super().rollback()
 
 
-class X86UnicornVSPECUnknown(X86FaultModelAbstract):
+class X86UnicornVspecOps(X86FaultModelAbstract):
     """
-    Contract for value speculation with unknown values
+    Contract for value speculation with unknown values.
+    Needs instantiations in subclasses depending on faults.
     """    
     # taints of registers
     reg_taints: Dict
@@ -540,9 +541,8 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
     } 
     
     def __init__(self, *args):
-        super().__init__(*args)        
-        # DIV exceptions only for now        
-        self.relevant_faults.update([6, 7, 12, 13, 21])
+        super().__init__(*args)             
+        # self.relevant_faults.update([6, 7, 12, 13, 21])
         self.reg_taints = dict()
         self.reg_taints_checkpoints = []
         self.mem_taints = dict()
@@ -617,10 +617,10 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                 # if this is the case, we need to keep the old taint of reg
                 if reg in model.curr_dest_regs_sizes and model.curr_dest_regs_sizes[reg] < 64:
                     new_taint = model.reg_taints[reg] | model.curr_taint
-                    X86UnicornVSPECUnknown.set_taint(model, reg, new_taint)
+                    X86UnicornVspecOps.set_taint(model, reg, new_taint)
                 # else, old taint is overwritten if the source is currently taitned
                 elif model.curr_src_tainted:
-                    X86UnicornVSPECUnknown.set_taint(model, reg, model.curr_taint)
+                    X86UnicornVspecOps.set_taint(model, reg, model.curr_taint)
                 # if source is not tainted and destination is overwritten, remove old taint
                 else:
                     model.reg_taints.pop(reg, None)
@@ -633,21 +633,19 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                     reg_value = model.emulator.reg_read(reg_id)
                     pc = model.curr_instruction_addr - model.code_start
                     new_taint = {(pc, reg_id, reg_value)} | model.curr_taint
-                    X86UnicornVSPECUnknown.set_taint(model, reg, new_taint)
+                    X86UnicornVspecOps.set_taint(model, reg, new_taint)
                 # if not, just set current taint as taint of reg
                 else:
-                    X86UnicornVSPECUnknown.set_taint(model, reg, model.curr_taint)
+                    X86UnicornVspecOps.set_taint(model, reg, model.curr_taint)
     
     
     def speculate_fault(self, errno: int) -> int:        
         if not self.fault_triggers_speculation(errno):
             return 0
-        
                    
         # start speculation
-        # we set the rollback address to the end of the testcase
-        # because faults are terminating execution
-        self.checkpoint(self.emulator, self.code_end)
+        # set the rollback address
+        self.checkpoint(self.emulator, self.get_rollback_address())
         
         # only collect new taints if none of the src operands in the faulting instruction are tainted
         # if they are, the taints have been propagated correctly already, so just ignore fault
@@ -675,7 +673,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                                             
             # source_values = evaluated load address + values of src regs  
             # these are all the values the faulting instruction depends on
-            self.curr_taint, _ = X86UnicornVSPECUnknown.assemble_reg_values(self, src_regs)            
+            self.curr_taint, _ = X86UnicornVspecOps.assemble_reg_values(self, src_regs)            
             
             if self.current_instruction.has_read():
                 address = self.curr_mem_load[0]
@@ -693,12 +691,9 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
             
             # need to set curr_src_tainted to make update_reg_taints call work              
             self.curr_src_tainted = True 
-            X86UnicornVSPECUnknown.update_reg_taints(self)    
+            X86UnicornVspecOps.update_reg_taints(self)    
+                    
             
-            # TODO for generalisation from DIV: instruction might have store
-            
-        
-        
         # speculatively skip the faulting instruction
         if self.next_instruction_addr >= self.code_end:
             return 0  # no need for speculation if we're at the end
@@ -711,7 +706,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         """
         Track how taints move through system and produce correct observations.
         """
-        assert isinstance(model, X86UnicornVSPECUnknown)
+        assert isinstance(model, X86UnicornVspecOps)
                 
         # print('current taints:', model.reg_taints, model.mem_taints)
         # print('current instruction:', model.current_instruction)
@@ -770,7 +765,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                         src_regs.add(normalized)
                 
         # assemble values of memory dest registers. if tainted, use taint instead       
-        mem_dest_reg_values, _ = X86UnicornVSPECUnknown.assemble_reg_values(model, mem_dest_regs)                       
+        mem_dest_reg_values, _ = X86UnicornVspecOps.assemble_reg_values(model, mem_dest_regs)                       
                         
         # check if instruction attempted store using tainted register
         #     => location of store unknown
@@ -786,7 +781,7 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
             # if yes, other destination registers might get tainted, so continue 
             
         # assemble values of memory src registers. if tainted, use taint instead   
-        mem_src_reg_values, _ = X86UnicornVSPECUnknown.assemble_reg_values(model, mem_src_regs)
+        mem_src_reg_values, _ = X86UnicornVspecOps.assemble_reg_values(model, mem_src_regs)
         
         # check if instruction attempted load using tainted register
         #     => location of load unknown
@@ -809,13 +804,13 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
             return
         
         # assemble value of all src regs, use taint if tainted
-        model.curr_taint, model.curr_src_tainted = X86UnicornVSPECUnknown.assemble_reg_values(model, src_regs)        
-        X86UnicornVSPECUnknown.update_reg_taints(model)
+        model.curr_taint, model.curr_src_tainted = X86UnicornVspecOps.assemble_reg_values(model, src_regs)        
+        X86UnicornVspecOps.update_reg_taints(model)
         
             
     @staticmethod
     def trace_mem_access(emulator, access, address, size, value, model) -> None:
-        assert isinstance(model, X86UnicornVSPECUnknown)
+        assert isinstance(model, X86UnicornVspecOps)
         
         #remember last address and size in case of exception
         if access != UC_MEM_WRITE:
@@ -841,14 +836,14 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
                 # remember that instruction used tainted src value
                 model.curr_src_tainted = True
                 # update taint of dest registers with address taint       
-                X86UnicornVSPECUnknown.update_reg_taints(model)            
+                X86UnicornVspecOps.update_reg_taints(model)            
             # if address itself is not tainted, value stored at address to current taint
             #     and potentially add to taints
             else:
                 mem_value = int.from_bytes(mem_value, 'little')
                 pc = model.curr_instruction_addr - model.code_start
                 model.curr_taint.add((pc, address, size, mem_value))
-                X86UnicornVSPECUnknown.update_reg_taints(model) 
+                X86UnicornVspecOps.update_reg_taints(model) 
                     
         if access == UC_MEM_WRITE:
             # check if any src operand was tainted (memory location or register)
@@ -889,9 +884,23 @@ class X86UnicornVSPECUnknown(X86FaultModelAbstract):
         self.mem_taints = self.mem_taints_checkpoints.pop()
         self.whole_memory_tainted = self.whole_memory_tainted_checkpoints.pop()
         return super().rollback()
+    
+    def get_rollback_address(self) -> int:
+        """ This function exists so that we can overwrite the rollback in subclasses """
+        return self.code_end   
 
+class x86UnicornVspecOpsDIV(X86UnicornVspecOps):
+    
+    def __init__(self, *args):
+        super().__init__(*args)        
+        # DIV exceptions only     
+        self.relevant_faults.add(21)
+        
+    def get_rollback_address(self) -> int:
+        # division errors end program execution
+        return self.code_end 
 
-class x86UnicornVSPECUnknownFaulty(X86UnicornVSPECUnknown):
+class x86UnicornVspecOpsDIVFaulty(x86UnicornVspecOpsDIV):
     """
     This class is only to show that we cannot remove one of the operands
     from the dependencies.
@@ -901,8 +910,8 @@ class x86UnicornVSPECUnknownFaulty(X86UnicornVSPECUnknown):
     
     def __init__(self, *args):
         super().__init__(*args)        
-        # we only do that experiment for DE exceptions
-        self.relevant_faults = {21}
+        # DIV exceptions only     
+        self.relevant_faults.add(21)
         
     def _load_input(self, input_: Input):
         self.last_faulty_addr = -1
@@ -925,15 +934,30 @@ class x86UnicornVSPECUnknownFaulty(X86UnicornVSPECUnknown):
         self.last_faulty_addr = self.curr_instruction_addr
         
         return next_instruction_address
+    
+    def get_rollback_address(self) -> int:
+        # division errors end program execution
+        return self.code_end 
         
+class x86UnicornVpecOpsPageFaults(X86UnicornVspecOps):
+    def __init__(self, *args):
+        super().__init__(*args)        
+        # DIV exceptions only     
+        self.relevant_faults.update([12,13])
         
+    # TODO: add rollbacks for page faults
 
-class X86Bottom(X86UnicornVSPECUnknown):
+class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
     """
     Most permissive contract. 
-    Uses vspec-unknown contract but value of destination operands in case of 
-    exception depends on full architectural state (= on full input) i nstead of value of src operands.
+    Uses vspec-unknown contract but destination operands in case of 
+    exception depends on full architectural state (= on full input) instead of value of src operands.
     """
+    
+    def __init__(self, *args):
+        super().__init__(*args)        
+        # page faults
+        self.relevant_faults.update([12,13])
     
     def speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):
@@ -971,15 +995,10 @@ class X86Bottom(X86UnicornVSPECUnknown):
             return 0  # no need for speculation if we're at the end
         else:
             return self.next_instruction_addr
-        
-        # remove protection
-        # self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
-        #                           self.FAULTY_REGION_SIZE)
-
-        # return self.curr_instruction_addr
+                
         
     def get_rollback_address(self) -> int:
-        """ This function exists so that we can overwrite the rollback in subclasses """
+        # TODO: add rollbacks for page faults
         return self.code_end    
 
 

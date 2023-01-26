@@ -65,7 +65,7 @@ class UnicornTracer(Tracer):
     def add_pc_to_trace(self, address, model):
         self.trace.append(address)
         model.taint_tracker.taint_pc()
-        
+
     def add_dependencies_to_trace(self, address, dependency_hash, model):
         self.trace.append(dependency_hash)
         model.taint_tracker.taint_memory_access_address()

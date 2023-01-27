@@ -981,7 +981,20 @@ class x86UnicornVpecOpsPageFaults(X86UnicornVspecOps):
         # DIV exceptions only
         self.relevant_faults.update([12, 13])
 
-    # TODO: add rollbacks for page faults
+    def rollback(self) -> int:
+        next_instruction = super().rollback()        
+        if not self.in_speculation:
+            # remove protection
+            self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
+                                    self.FAULTY_REGION_SIZE)
+        
+        return next_instruction        
+
+    def get_rollback_address(self) -> int:        
+        if self.in_speculation:
+            return self.code_end
+        else:
+            return self.curr_instruction_addr
 
 
 class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
@@ -1034,8 +1047,7 @@ class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
             return self.next_instruction_addr
         
     def rollback(self) -> int:
-        next_instruction = super().rollback()
-        
+        next_instruction = super().rollback()        
         if not self.in_speculation:
             # remove protection
             self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,

@@ -40,11 +40,13 @@ TRACERS: Dict[str, Type[model.UnicornTracer]] = {
 X86_SIMPLE_EXECUTION_CLAUSES: Dict[str, Type[x86_model.X86UnicornModel]] = {
     "seq": x86_model.X86UnicornSeq,
     "no_speculation": x86_model.X86UnicornSeq,
+    "seq-assist": x86_model.X86SequentialAssist,
     "cond": x86_model.X86UnicornCond,
     "conditional_br_misprediction": x86_model.X86UnicornCond,
     "bpas": x86_model.X86UnicornBpas,
-    "nullinj": x86_model.X86UnicornNull,
-    "nullinj-term": x86_model.X86UnicornNullTerminating,
+    "nullinj": x86_model.X86UnicornNullAssist,  # keyword is to be deprecated
+    "nullinj-assist": x86_model.X86UnicornNullAssist,
+    "nullinj-term": x86_model.X86UnicornNull,
     "ooo": x86_model.X86UnicornOOO,
     "vspec-ops-div": x86_model.x86UnicornVspecOpsDIV,
     # contract below only faulty if taint tracking for input generation is altered, see model.py

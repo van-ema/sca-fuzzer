@@ -293,6 +293,25 @@ class X86FaultModelAbstract(X86UnicornSpec):
         model.next_instruction_addr = address + size
         X86UnicornSpec.trace_instruction(emulator, address, size, model)
 
+    def get_rollback_address(self) -> int:
+        return self.code_end
+
+
+class X86SequentialAssist(X86FaultModelAbstract):
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.relevant_faults.update([12, 13])
+
+    def speculate_fault(self, errno: int) -> int:
+        if not self.fault_triggers_speculation(errno):
+            return 0
+
+        # no speculation - simply reset the permissions
+        self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
+                                  self.FAULTY_REGION_SIZE)
+        return self.curr_instruction_addr
+
 
 class X86UnicornNull(X86FaultModelAbstract):
     """
@@ -359,15 +378,11 @@ class X86UnicornNull(X86FaultModelAbstract):
                                   self.FAULTY_REGION_SIZE)
         return super().rollback()
 
+
+class X86UnicornNullAssist(X86UnicornNull):
+
     def get_rollback_address(self) -> int:
-        """ This function exists so that we can overwrite the rollback in subclasses """
         return self.curr_instruction_addr
-
-
-class X86UnicornNullTerminating(X86UnicornNull):
-
-    def get_rollback_address(self) -> int:
-        return self.code_end
 
 
 class X86UnicornOOO(X86FaultModelAbstract):
@@ -391,7 +406,7 @@ class X86UnicornOOO(X86FaultModelAbstract):
         # start speculation
         # we set the rollback address to the end of the testcase
         # because faults are terminating execution
-        self.checkpoint(self.emulator, self.code_end)
+        self.checkpoint(self.emulator, self.get_rollback_address())
 
         # add destinations to the dependency list
         for op in self.current_instruction.get_dest_operands(True):

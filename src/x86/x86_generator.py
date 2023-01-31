@@ -10,6 +10,7 @@ import re
 import random
 from typing import List, Dict, Set, Optional, Tuple
 from subprocess import run
+from copy import deepcopy
 
 from isa_loader import InstructionSet
 from interfaces import TestCase, Operand, RegisterOperand, FlagsOperand, MemoryOperand, \
@@ -88,8 +89,8 @@ class X86Generator(ConfigurableGenerator, abc.ABC):
         self.passes = [
             X86SandboxPass(self.target_desc),
             X86PatchUndefinedFlagsPass(self.instruction_set, self),
-            X86NonCanonicalAddressPass(),
             X86PatchUndefinedResultPass(),
+            X86NonCanonicalAddressPass(),
             X86PatchOpcodesPass(),
         ]
         self.printer = X86Printer()
@@ -302,9 +303,14 @@ class X86NonCanonicalAddressPass(Pass):
                     continue
 
                 memory_instructions = []
-                for inst in bb:
-                    if inst.has_mem_operand(True):
-                        memory_instructions.append(inst)
+                for instr in bb:
+                    if instr.is_instrumentation:
+                        continue
+                    if instr.name in ["DIV", "IDIV"]:
+                    # Instrumentation is difficult to combine
+                        continue
+                    if instr.has_mem_operand(True):
+                        memory_instructions.append(instr)
 
                 # Collect src operands
                 for instr in memory_instructions:
@@ -324,18 +330,26 @@ class X86NonCanonicalAddressPass(Pass):
                         assert len(mem_operands) == 1, f"Unexpected instruction format {instr.name}"
                         mem_operand: Operand = mem_operands[0]
                         registers = mem_operand.value
+                        
+                        masksList = ["RAX", "RBX"]
+                        mask_reg = masksList[0]
+                        # Do not overwrite offset register with mask
+                        for operands in src_operands:
+                            usedRegs = re.split(r'\+|-|\*| ', operands.value)
+                            for reg in usedRegs:
+                                if X86TargetDesc.gpr_normalized[mask_reg] == \
+                                    X86TargetDesc.gpr_normalized[reg]:
+                                    mask_reg = masksList[1]
 
-                        offsets = ["RCX", "RDX"]
-                        masks = ["RAX", "RBX"]
-                        offset_reg = offsets[0]
-                        mask_reg = masks[0]
-                        for reg in src_operands:
+                        offsetList = ["RCX", "RDX"]
+                        offset_reg = offsetList[0]
+                        # Do not reuse destination register
+                        for op in instr.get_all_operands():
+                            if not isinstance(op, RegisterOperand):
+                                continue
                             if X86TargetDesc.gpr_normalized[offset_reg] == \
-                               X86TargetDesc.gpr_normalized[reg.value]:
-                                offset_reg = offsets[1]
-                            if X86TargetDesc.gpr_normalized[mask_reg] == \
-                               X86TargetDesc.gpr_normalized[reg.value]:
-                                mask_reg = masks[1]
+                                X86TargetDesc.gpr_normalized[op.value]:
+                                offset_reg = offsetList[1]
 
                         mask = hex((random.getrandbits(16) << 48))
                         lea = Instruction("LEA", True) \
@@ -476,7 +490,7 @@ class X86SandboxPass(Pass):
         The second corner case is 8-bit division, when the divisor is the AX register alone.
         Here the instrumentation become too complicated, and we simply set AX to 1.
         """
-        divisor = inst.operands[0]
+        divisor = deepcopy(inst.operands[0])
 
         # TODO: remove me - avoids a certain violation
         if divisor.width == 64 and CONF.x86_disable_div64:  # type: ignore
@@ -746,7 +760,7 @@ class X86PatchUndefinedResultPass(Pass):
         Bit Scan instructions give an undefined result when the source operand is zero.
         To avoid it, set the most significant bit.
         """
-        source = inst.operands[1]
+        source = deepcopy(inst.operands[1])
         mask = bin(1 << (source.width - 1))
         mask_size = source.width
         if source.width in [64, 32]:

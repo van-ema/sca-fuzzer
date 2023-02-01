@@ -1060,13 +1060,12 @@ class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
                 address = self.curr_mem_store[0]
                 size = self.curr_mem_store[1]
                 for i in range(size):
-                    pc = self.curr_instruction_addr - self.code_start
-                    self.mem_taints[address + i] = {TaintedValue(pc, address, self.full_input_taint)}
+                    self.mem_taints[address + i] = {self.full_input_taint}
 
             # taint destination registers with hash of full input (represents architectural state)
             for reg in self.curr_dest_regs:
                 pc = self.curr_instruction_addr - self.code_start
-                self.reg_taints[reg] = {TaintedValue(pc, address, self.full_input_taint)}
+                self.reg_taints[reg] = {self.full_input_taint}
         # speculatively skip the faulting instruction
         if self.next_instruction_addr >= self.code_end:
             return 0  # no need for speculation if we're at the end
@@ -1473,13 +1472,13 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
                 address = self.curr_mem_store[0]
                 size = self.curr_mem_store[1]
                 for i in range(size):
-                    self.mem_taints[address + i] = {TaintedValue(pc, address, self.full_input_taint)}
+                    self.mem_taints[address + i] = {self.full_input_taint}
             # taint destination registers with hash of full input (represents architectural state)
 
             if self.current_instruction.has_read():
                 for reg in self.curr_dest_regs:
                     address = self.curr_mem_load[0]
-                    self.reg_taints[reg] = {TaintedValue(pc, address, self.full_input_taint)}
+                    self.reg_taints[reg] = {self.full_input_taint}
 
         # need to set curr_src_tainted to make update_reg_taints call work
         self.curr_src_tainted = True

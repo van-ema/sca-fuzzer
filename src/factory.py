@@ -58,6 +58,7 @@ X86_SIMPLE_EXECUTION_CLAUSES: Dict[str, Type[x86_model.X86UnicornModel]] = {
     "meltdown": x86_model.X86Meltdown,
     "fault-skip": x86_model.X86FaultSkip,
     "noncanonical": x86_model.X86NonCanonicalAddress,
+    "vspec-ops-gp": x86_model.x86UnicornVpecOpsGP
 }
 
 EXECUTORS = {

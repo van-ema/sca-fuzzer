@@ -1266,7 +1266,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
     """
     fauty_instruction_addr: int
     address_register : int
-    register_value: int    
+    register_value: int
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -1294,13 +1294,13 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
 
         if model.fauty_instruction_addr != address:
             return
-        
+
         ## Fix non-canonical address
         for mem_op in model.current_instruction.get_mem_operands():
             registers = re.split(r'\+|-|\*| ', mem_op.value)
             if len(registers) > 1:
                 continue
-            
+
             uc_reg = X86UnicornTargetDesc.reg_str_to_constant[registers[0]]
             load_address = model.emulator.reg_read(uc_reg)  # load address
             isCanonical : bool = load_address > 0xFFFF800000000000 \
@@ -1308,7 +1308,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
             if not isCanonical:
                 model.address_register  = uc_reg
                 model.register_value = load_address
-                
+
                 if load_address & (1 << 47):  # bit 48 is 1 => high address
                     load_address = load_address | 0xFFFF800000000000
                 else:  # bit 48 is 0 => low address
@@ -1316,6 +1316,114 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
                 model.emulator.reg_write(uc_reg, load_address)
                 return
         return
+
+    def reset_model(self):
+        self.fauty_instruction_addr = -1
+        self.address_register = -1
+        self.register_value = -1
+        return super().reset_model()
+
+
+class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
+    address_register : int
+    register_value: int
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.relevant_faults.update([6, 7])
+
+    def speculate_fault(self, errno: int) -> int:
+        if not self.fault_triggers_speculation(errno):
+            return 0
+
+        self.checkpoint(self.emulator, self.code_end)
+        self.fauty_instruction_addr = self.curr_instruction_addr
+        return self.curr_instruction_addr
+
+
+    def _speculate_fault(self, errno: int) -> int:
+        if not self.fault_triggers_speculation(errno):
+            return 0
+
+        # only collect new taints if none of the src operands in the faulting instruction are
+        # tainted if they are, the taints have been propagated correctly already,code_start
+        # so just ignore fault
+        if not self.curr_src_tainted:
+
+            # collect registers occurring in src and destination operands
+            # src_regs = src registers occurring outside memory load
+            # dest_regs = dest registers occurring outside memory store
+            # mem_src_regs = src registers occurring as part of address
+            # mem_dest_regs = dest registers occurring as part of store
+            src_regs = set()
+            for op in self.current_instruction.get_all_operands():
+                if isinstance(op, RegisterOperand):
+                    if op.src:
+                        op_normalized = X86TargetDesc.gpr_normalized[op.value]
+                        src_regs.add(op_normalized)
+                        # src_regs_sizes[op_normalized] = op.width
+                    if op.dest:
+                        op_normalized = X86TargetDesc.gpr_normalized[op.value]
+                        self.curr_dest_regs.append(op_normalized)
+                        self.curr_dest_regs_sizes[op_normalized] = op.width
+                elif isinstance(op, FlagsOperand):
+                    src_regs.update(op.get_read_flags())
+                    self.curr_dest_regs.extend(op.get_write_flags())
+
+            # source_values = evaluated load address + values of src regs
+            # these are all the values the faulting instruction depends on
+            self.curr_taint, _ = self.assemble_reg_values(src_regs)
+
+            if self.current_instruction.has_read():
+                address = self.curr_mem_load[0]
+                address = self.canonical(address)
+                size = self.curr_mem_load[1]
+                mem_value = self.emulator.mem_read(address, size)
+                mem_value = int.from_bytes(mem_value, 'little')
+                pc = self.curr_instruction_addr - self.code_start
+                self.curr_taint.add(TaintedValue(pc, address, mem_value))
+
+            if self.current_instruction.has_write():
+                address = self.curr_mem_store[0]
+                address = self.canonical(address)
+                size = self.curr_mem_store[1]
+                for i in range(size):
+                    self.mem_taints[address + i] = self.curr_taint
+
+            # need to set curr_src_tainted to make update_reg_taints call work
+            self.curr_src_tainted = True
+            self.update_reg_taints()
+
+        # speculatively skip the faulting instruction
+        return self.curr_instruction_addr
+
+    @staticmethod
+    def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
+                         model: UnicornModel) -> None:
+        assert isinstance(model, x86UnicornVpecOpsGP)
+        if model.curr_instruction_addr == model.fauty_instruction_addr:
+            if access != UC_MEM_WRITE:
+                model.curr_mem_load = (address, size)
+            else:
+                model.curr_mem_store = (address, size)
+            model._speculate_fault(6)
+        X86UnicornVspecOps.trace_mem_access(emulator, access, address, size, value, model)
+
+    @staticmethod
+    def speculate_instruction(emulator: Uc, address, size, model) -> None:
+        X86NonCanonicalAddress.speculate_instruction(emulator, address, size, model)
+        if address != model.fauty_instruction_addr:
+            X86UnicornVspecOps.speculate_instruction(emulator, address, size, model)
+
+    def canonical(self, address: int):
+        if address & (1 << 47):  # bit 48 is 1 => high address
+            address = address | 0xFFFF800000000000
+        else:  # bit 48 is 0 => low address
+            address = address & 0x00007FFFFFFFFFF
+        return address
+
+    def get_rollback_address(self) -> int:
+            return self.code_end
 
     def reset_model(self):
         self.fauty_instruction_addr = -1

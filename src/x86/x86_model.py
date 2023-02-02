@@ -1408,6 +1408,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
             else:
                 model.curr_mem_store = (address, size)
             model._speculate_fault(6)
+            return
         X86UnicornVspecOps.trace_mem_access(emulator, access, address, size, value, model)
 
     @staticmethod
@@ -1433,21 +1434,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         return super().reset_model()
 
 
-class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
-    address_register: int
-    register_value: int
-
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.relevant_faults.update([6, 7])
-
-    def speculate_fault(self, errno: int) -> int:
-        if not self.fault_triggers_speculation(errno):
-            return 0
-
-        self.checkpoint(self.emulator, self.code_end)
-        self.fauty_instruction_addr = self.curr_instruction_addr
-        return self.curr_instruction_addr
+class x86UnicornVpecAllGP(x86UnicornVpecOpsGP):
 
     def _speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):
@@ -1482,42 +1469,6 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         print(f"Mem taints: {self.mem_taints}")
         print(f"Reg taints: {self.reg_taints}")
         return self.curr_instruction_addr
-
-    @staticmethod
-    def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
-                         model: UnicornModel) -> None:
-        assert isinstance(model, x86UnicornVpecAllGP)
-        if model.curr_instruction_addr == model.fauty_instruction_addr:
-            if access != UC_MEM_WRITE:
-                model.curr_mem_load = (address, size)
-            else:
-                model.curr_mem_store = (address, size)
-            model._speculate_fault(6)
-            X86FaultModelAbstract.trace_mem_access(emulator, access, address, size, value, model)
-            return
-        X86UnicornVspecOps.trace_mem_access(emulator, access, address, size, value, model)
-
-    @staticmethod
-    def speculate_instruction(emulator: Uc, address, size, model) -> None:
-        X86NonCanonicalAddress.speculate_instruction(emulator, address, size, model)
-        if address != model.fauty_instruction_addr:
-            X86UnicornVspecOps.speculate_instruction(emulator, address, size, model)
-
-    def canonical(self, address: int):
-        if address & (1 << 47):  # bit 48 is 1 => high address
-            address = address | 0xFFFF800000000000
-        else:  # bit 48 is 0 => low address
-            address = address & 0x00007FFFFFFFFFF
-        return address
-
-    def get_rollback_address(self) -> int:
-        return self.code_end
-
-    def reset_model(self):
-        self.fauty_instruction_addr = -1
-        self.address_register = -1
-        self.register_value = -1
-        return super().reset_model()
 
 
 # ==================================================================================================

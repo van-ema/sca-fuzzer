@@ -1401,7 +1401,7 @@ class x86UnicornVspecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
     @staticmethod
     def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
                          model: UnicornModel) -> None:
-        assert isinstance(model, x86UnicornVpecOpsGP)
+        assert isinstance(model, x86UnicornVspecOpsGP)
         if model.curr_instruction_addr == model.fauty_instruction_addr:
             if access != UC_MEM_WRITE:
                 model.curr_mem_load = (address, size)
@@ -1435,7 +1435,7 @@ class x86UnicornVspecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         return super().reset_model()
 
 
-class x86UnicornVspecAllGP(x86UnicornVpecOpsGP):
+class x86UnicornVspecAllGP(x86UnicornVspecOpsGP):
 
     def _speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):

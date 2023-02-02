@@ -1000,7 +1000,7 @@ class x86UnicornVspecOpsDIVFaulty(x86UnicornVspecOpsDIV):
         return self.code_end
 
 
-class x86UnicornVpecOpsPageFaults(X86UnicornVspecOps):
+class x86UnicornVspecOpsPageFaults(X86UnicornVspecOps):
 
     def __init__(self, *args):
         super().__init__(*args)

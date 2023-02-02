@@ -51,7 +51,7 @@ X86_SIMPLE_EXECUTION_CLAUSES: Dict[str, Type[x86_model.X86UnicornModel]] = {
     "vspec-ops-div": x86_model.x86UnicornVspecOpsDIV,
     # contract below only faulty if taint tracking for input generation is altered, see model.py
     "vspec-ops-div-faulty": x86_model.x86UnicornVspecOpsDIVFaulty,
-    "vspec-ops-page-faults": x86_model.x86UnicornVpecOpsPageFaults,
+    "vspec-ops-page-faults": x86_model.x86UnicornVspecOpsPageFaults,
     "vspec-all-page-faults": x86_model.X86UnicornVspecAllPageFaults,
     "div-zero": x86_model.X86UnicornDivZero,
     "div-overflow": x86_model.X86UnicornDivOverflow,

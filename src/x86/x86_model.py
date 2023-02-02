@@ -572,14 +572,6 @@ class X86UnicornOOO(X86FaultModelAbstract):
         self.dependencies = self.dependency_checkpoints.pop()
         return super().rollback()
 
-    @staticmethod
-    def try_enable_conditional_move(model):
-        """
-        Try to modify flag register to make conditional move happen.
-        """
-        current = model.emulator.reg_read(ucc.UC_X86_REG_EFLAGS)
-        read_flag = model.current_instruction.get_flags_operand().get_read_flags()
-        tainted_flags = [f for f in read_flag if f in model.reg_taints]
 
 class TaintedValue(NamedTuple):
     po: int
@@ -821,6 +813,9 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         if not model.in_speculation or (not model.reg_taints and not model.mem_taints):
             return
 
+        if X86TargetDesc.is_conditional_move(model.current_instruction):
+            X86UnicornVspecOps.try_enable_conditional_move(model)
+
         src_regs = set()
         mem_src_regs = set()
         mem_dest_regs = set()
@@ -984,6 +979,56 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
     def get_rollback_address(self) -> int:
         # faults end program execution
         return self.code_end
+
+    @staticmethod
+    def try_enable_conditional_move(model):
+        """
+        Try to modify flag register to make conditional move happen.
+        """
+        current = model.emulator.reg_read(ucc.UC_X86_REG_EFLAGS)
+        read_flag = model.current_instruction.get_flags_operand().get_read_flags()
+        tainted_flags = [f for f in read_flag if f in model.reg_taints]
+
+        flag = current
+        name = model.current_instruction.name
+        condition = cmov_condition[name]
+        print(f"{condition(current)}")
+        # if the cmov is already enable or flags are not tainted than skip
+        if len(tainted_flags) != 0 and not condition(current):
+            if name in ["CMOVB", "CMOVO", "CMOVP", "CMOVP", "CMOVZ"]:
+                assert (len(tainted_flags) == 1)
+                flag |= model.flags_translate[read_flag[0]]
+                print(f"New flag=0b{flag:b}")
+            elif name in ["CMOVNO", "CMOVNP", "CMOVNS", "CMOVNZ"]:
+                assert (len(tainted_flags) == 1)
+                flag &= ~model.flags_translate[read_flag[0]]
+            elif "CMOVBE" == name:
+                flag |= FLAGS_CF if ("CF" in tainted_flags) else FLAGS_ZF
+            elif "CMOVL" == name:
+                flag ^= FLAGS_SF if ("SF" in tainted_flags) else FLAGS_OF
+            elif "CMOVLE" == name:
+                if "ZF" in tainted_flags:
+                    flag |= FLAGS_ZF
+                else:
+                    flag ^= FLAGS_SF if ("SF" in tainted_flags) else FLAGS_OF
+            elif "CMOVNBE" == name:
+                if "CF" in tainted_flags:
+                    flag &= ~FLAGS_CF
+                if "ZF" in tainted_flags:
+                    flag &= ~FLAGS_ZF
+            elif "CMOVNL" == name:
+                if "SF" in tainted_flags:
+                    flag ^= FLAGS_SF
+                elif "OF" in tainted_flags:
+                    flag ^= FLAGS_OF
+            elif "CMOVNLE" == name:
+                if "ZF" in tainted_flags:
+                    flag &= ~FLAGS_ZF
+                if "OF" in tainted_flags:
+                    flag &= ~FLAGS_OF
+        if flag != current:
+            print("New flag=0b{flag:b}")
+            model.emulator.reg_write(ucc.UC_X86_REG_EFLAGS, flag)
 
 
 class x86UnicornVspecOpsDIV(X86UnicornVspecOps):
@@ -1340,7 +1385,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
         return super().reset_model()
 
 
-class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
+class x86UnicornVspecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
     address_register: int
     register_value: int
 
@@ -1415,7 +1460,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
     @staticmethod
     def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
                          model: UnicornModel) -> None:
-        assert isinstance(model, x86UnicornVpecOpsGP)
+        assert isinstance(model, x86UnicornVspecOpsGP)
         if model.curr_instruction_addr == model.faulty_instruction_addr:
             if access != UC_MEM_WRITE:
                 model.curr_mem_load = (address, size)

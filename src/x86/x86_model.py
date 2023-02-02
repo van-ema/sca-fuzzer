@@ -1325,7 +1325,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
         return super().reset_model()
 
 
-class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
+class x86UnicornVspecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
     address_register: int
     register_value: int
 
@@ -1435,7 +1435,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         return super().reset_model()
 
 
-class x86UnicornVpecAllGP(x86UnicornVpecOpsGP):
+class x86UnicornVspecAllGP(x86UnicornVpecOpsGP):
 
     def _speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):

@@ -102,6 +102,10 @@ class X86TargetDesc(TargetDesc):
         return inst.category == "BASE-UNCOND_BR"
 
     @staticmethod
+    def is_conditional_move(inst: Instruction) -> bool:
+        return inst.category == "BASE-CMOV"
+
+    @staticmethod
     def is_call(inst: Instruction) -> bool:
         return inst.category == "BASE-CALL"
 

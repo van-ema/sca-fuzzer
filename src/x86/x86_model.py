@@ -29,6 +29,29 @@ FLAGS_DF = 0b010000000000
 FLAGS_OF = 0b100000000000
 
 
+cmov_condition = {
+    "CMOVB": lambda flag: ((flag & FLAGS_CF) != 0),                                 # CF=1
+    "CMOVBE": lambda flag: (flag & (FLAGS_CF | FLAGS_ZF) != 0),                     # CF=1 or ZF=1
+    "CMOVL": lambda flag: (((flag & FLAGS_SF) != 0) != ((flag & FLAGS_OF) != 0)),   # SF<>OF
+    "CMOVLE": lambda flag: ((((flag & FLAGS_SF) != 0) != ((flag & FLAGS_OF) != 0))
+                            or ((flag & FLAGS_ZF) != 0)),                           # ZF=1 or SF<>OF
+    "CMOVNB": lambda flag: (flag & FLAGS_CF == 0),                                  # CF=0
+    "CMOVNBE": lambda flag: (((flag & FLAGS_CF) == 0)
+                             and ((flag & FLAGS_ZF) == 0)),                         # CF=0 and ZF=0
+    "CMOVNL": lambda flag: (((flag & FLAGS_SF) != 0) == ((flag & FLAGS_OF) != 0)),  # SF=OF
+    "CMOVNLE": lambda flag: (((flag & FLAGS_ZF) == 0)
+                             and ((flag & FLAGS_OF) == 0)),                         # ZF=0 and SF=OF
+    "CMOVNO": lambda flag: ((flag & FLAGS_OF) == 0),                                # OF=0
+    "CMOVNP": lambda flag: ((flag & FLAGS_PF) == 0),                                # PF=0
+    "CMOVNS": lambda flag: ((flag & FLAGS_SF) == 0),                                # SF=0
+    "CMOVNZ": lambda flag: ((flag & FLAGS_ZF) == 0),                                # ZF=0
+    "CMOVO": lambda flag: ((flag & FLAGS_OF) != 0),                                 # OF=1
+    "CMOVP": lambda flag: ((flag & FLAGS_PF) != 0),                                 # PF=1
+    "CMOVS": lambda flag: ((flag & FLAGS_SF) != 0),                                 # SF=1
+    "CMOVZ": lambda flag: ((flag & FLAGS_ZF) != 0),                                 # ZF=1
+}
+
+
 class X86UnicornModel(UnicornModel):
     """
     Base class that serves as main interface.
@@ -547,6 +570,56 @@ class X86UnicornOOO(X86FaultModelAbstract):
         self.dependencies = self.dependency_checkpoints.pop()
         return super().rollback()
 
+    @staticmethod
+    def try_enable_conditional_move(model):
+        """
+        Try to modify flag register to make conditional move happen.
+        """
+        current = model.emulator.reg_read(ucc.UC_X86_REG_EFLAGS)
+        read_flag = model.current_instruction.get_flags_operand().get_read_flags()
+        tainted_flags = [f for f in read_flag if f in model.reg_taints]
+
+        flag = current
+        name = model.current_instruction.name
+        condition = cmov_condition[name]
+        print(f"{condition(current)}")
+        # if the cmov is already enable or flags are not tainted than skip
+        if len(tainted_flags) != 0 and not condition(current):
+            if name in ["CMOVB", "CMOVO", "CMOVP", "CMOVP", "CMOVZ"]:
+                assert (len(tainted_flags) == 1)
+                flag |= model.flags_translate[read_flag[0]]
+                print(f"New flag=0b{flag:b}")
+            elif name in ["CMOVNO", "CMOVNP", "CMOVNS", "CMOVNZ"]:
+                assert (len(tainted_flags) == 1)
+                flag &= ~model.flags_translate[read_flag[0]]
+            elif "CMOVBE" == name:
+                flag |= FLAGS_CF if ("CF" in tainted_flags) else FLAGS_ZF
+            elif "CMOVL" == name:
+                flag ^= FLAGS_SF if ("SF" in tainted_flags) else FLAGS_OF
+            elif "CMOVLE" == name:
+                if "ZF" in tainted_flags:
+                    flag |= FLAGS_ZF
+                else:
+                    flag ^= FLAGS_SF if ("SF" in tainted_flags) else FLAGS_OF
+            elif "CMOVNBE" == name:
+                if "CF" in tainted_flags:
+                    flag &= ~FLAGS_CF
+                if "ZF" in tainted_flags:
+                    flag &= ~FLAGS_ZF
+            elif "CMOVNL" == name:
+                if "SF" in tainted_flags:
+                    flag ^= FLAGS_SF
+                elif "OF" in tainted_flags:
+                    flag ^= FLAGS_OF
+            elif "CMOVNLE" == name:
+                if "ZF" in tainted_flags:
+                    flag &= ~FLAGS_ZF
+                if "OF" in tainted_flags:
+                    flag &= ~FLAGS_OF
+        if flag != current:
+            print("New flag=0b{flag:b}")
+            model.emulator.reg_write(ucc.UC_X86_REG_EFLAGS, flag)
+
 
 class TaintedValue(NamedTuple):
     po: int
@@ -783,6 +856,9 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         if not model.in_speculation or (not model.reg_taints and not model.mem_taints):
             return
 
+        if X86TargetDesc.is_conditional_move(model.current_instruction):
+            X86UnicornVspecOps.try_enable_conditional_move(model)
+
         src_regs = set()
         mem_src_regs = set()
         mem_dest_regs = set()
@@ -863,8 +939,8 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         # assemble value of all src regs, use taint if tainted
         model.curr_taint, model.curr_src_tainted = model.assemble_reg_values(src_regs)
         model.update_reg_taints()
-        # print(f"Mem taints: {model.mem_taints}")
-        # print(f"Reg taints: {model.reg_taints}")
+        print(f"Mem taints: {model.mem_taints}")
+        print(f"Reg taints: {model.reg_taints}")
 
     @staticmethod
     def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,

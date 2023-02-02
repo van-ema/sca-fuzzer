@@ -70,6 +70,10 @@ class UnicornTracer(Tracer):
         self.trace.append(dependency_hash)
         model.taint_tracker.taint_memory_access_address()
 
+    def add_dependencies_to_trace(self, address, dependency_hash, model):
+        self.trace.append(dependency_hash)
+        model.taint_tracker.taint_memory_access_address()
+
     def observe_mem_access(self, access, address: int, size: int, value: int,
                            model: UnicornModel) -> None:
         normalized_address = address - model.sandbox_base
@@ -186,6 +190,8 @@ class UnicornModel(Model, ABC):
             self.handled_faults.update([12, 13])
         if 'PF-writable' in CONF.permitted_faults:
             self.handled_faults.add(12)
+        if 'PF-smap' in CONF.permitted_faults:
+            self.handled_faults.update([12, 13])
         if 'GP-noncanonical' in CONF.permitted_faults:
             self.handled_faults.update([6, 7])
         if 'assist-dirty' in CONF.permitted_faults:

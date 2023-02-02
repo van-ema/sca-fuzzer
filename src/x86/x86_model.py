@@ -1477,12 +1477,10 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
 
             if self.current_instruction.has_read():
                 for reg in self.curr_dest_regs:
-                    address = self.curr_mem_load[0]
                     self.reg_taints[reg] = {self.full_input_taint}
 
-        # need to set curr_src_tainted to make update_reg_taints call work
-        self.curr_src_tainted = True
-        self.update_reg_taints()
+            # need to set curr_src_tainted to make update_reg_taints call work
+            self.curr_src_tainted = True
 
         print(f"Mem taints: {self.mem_taints}")
         print(f"Reg taints: {self.reg_taints}")

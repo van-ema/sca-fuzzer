@@ -863,8 +863,8 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         # assemble value of all src regs, use taint if tainted
         model.curr_taint, model.curr_src_tainted = model.assemble_reg_values(src_regs)
         model.update_reg_taints()
-        print(f"Mem taints: {model.mem_taints}")
-        print(f"Reg taints: {model.reg_taints}")
+        # print(f"Mem taints: {model.mem_taints}")
+        # print(f"Reg taints: {model.reg_taints}")
 
     @staticmethod
     def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
@@ -1394,8 +1394,8 @@ class x86UnicornVspecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
             self.curr_src_tainted = True
             self.update_reg_taints()
 
-        print(f"Mem taints: {self.mem_taints}")
-        print(f"Reg taints: {self.reg_taints}")
+        # print(f"Mem taints: {self.mem_taints}")
+        # print(f"Reg taints: {self.reg_taints}")
         return self.curr_instruction_addr
 
     @staticmethod
@@ -1467,8 +1467,8 @@ class x86UnicornVspecAllGP(x86UnicornVpecOpsGP):
             # need to set curr_src_tainted to make update_reg_taints call work
             self.curr_src_tainted = True
 
-        print(f"Mem taints: {self.mem_taints}")
-        print(f"Reg taints: {self.reg_taints}")
+        # print(f"Mem taints: {self.mem_taints}")
+        # print(f"Reg taints: {self.reg_taints}")
         return self.curr_instruction_addr
 
 

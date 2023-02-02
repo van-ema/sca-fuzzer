@@ -1008,15 +1008,15 @@ class x86UnicornVpecOpsPageFaults(X86UnicornVspecOps):
         self.relevant_faults.update([12, 13])
 
     def rollback(self) -> int:
-        next_instruction = super().rollback()        
+        next_instruction = super().rollback()
         if not self.in_speculation:
             # remove protection
             self.emulator.mem_protect(self.sandbox_base + self.MAIN_REGION_SIZE,
-                                    self.FAULTY_REGION_SIZE)
-        
-        return next_instruction        
+                                      self.FAULTY_REGION_SIZE)
 
-    def get_rollback_address(self) -> int:        
+        return next_instruction
+
+    def get_rollback_address(self) -> int:
         if self.in_speculation:
             return self.code_end
         else:
@@ -1064,7 +1064,6 @@ class X86UnicornVspecAllPageFaults(X86UnicornVspecOps):
 
             # taint destination registers with hash of full input (represents architectural state)
             for reg in self.curr_dest_regs:
-                pc = self.curr_instruction_addr - self.code_start
                 self.reg_taints[reg] = {self.full_input_taint}
         # speculatively skip the faulting instruction
         if self.next_instruction_addr >= self.code_end:
@@ -1267,12 +1266,12 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
      Load from non-canonical addresss
     """
     fauty_instruction_addr: int
-    address_register : int
+    address_register: int
     register_value: int
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.relevant_faults.update([6,7])
+        self.relevant_faults.update([6, 7])
 
     def speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):
@@ -1297,7 +1296,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
         if model.fauty_instruction_addr != address:
             return
 
-        ## Fix non-canonical address
+        # Fix non-canonical address
         for mem_op in model.current_instruction.get_mem_operands():
             registers = re.split(r'\+|-|\*| ', mem_op.value)
             if len(registers) > 1:
@@ -1305,10 +1304,10 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
 
             uc_reg = X86UnicornTargetDesc.reg_str_to_constant[registers[0]]
             load_address = model.emulator.reg_read(uc_reg)  # load address
-            isCanonical : bool = load_address > 0xFFFF800000000000 \
+            isCanonical: bool = load_address > 0xFFFF800000000000 \
                 or load_address < 0x00007FFFFFFFFFFF
             if not isCanonical:
-                model.address_register  = uc_reg
+                model.address_register = uc_reg
                 model.register_value = load_address
 
                 if load_address & (1 << 47):  # bit 48 is 1 => high address
@@ -1327,7 +1326,7 @@ class X86NonCanonicalAddress(X86FaultModelAbstract):
 
 
 class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
-    address_register : int
+    address_register: int
     register_value: int
 
     def __init__(self, *args):
@@ -1341,7 +1340,6 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         self.checkpoint(self.emulator, self.code_end)
         self.fauty_instruction_addr = self.curr_instruction_addr
         return self.curr_instruction_addr
-
 
     def _speculate_fault(self, errno: int) -> int:
         if not self.fault_triggers_speculation(errno):
@@ -1426,7 +1424,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         return address
 
     def get_rollback_address(self) -> int:
-            return self.code_end
+        return self.code_end
 
     def reset_model(self):
         self.fauty_instruction_addr = -1
@@ -1436,7 +1434,7 @@ class x86UnicornVpecOpsGP(X86UnicornVspecOps, X86NonCanonicalAddress):
 
 
 class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
-    address_register : int
+    address_register: int
     register_value: int
 
     def __init__(self, *args):
@@ -1467,7 +1465,6 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
                 elif isinstance(op, FlagsOperand):
                     self.curr_dest_regs.extend(op.get_write_flags())
 
-            pc = self.curr_instruction_addr - self.code_start
             if self.current_instruction.has_write():
                 address = self.curr_mem_store[0]
                 size = self.curr_mem_store[1]
@@ -1514,13 +1511,14 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
         return address
 
     def get_rollback_address(self) -> int:
-            return self.code_end
+        return self.code_end
 
     def reset_model(self):
         self.fauty_instruction_addr = -1
         self.address_register = -1
         self.register_value = -1
         return super().reset_model()
+
 
 # ==================================================================================================
 # Taint tracker

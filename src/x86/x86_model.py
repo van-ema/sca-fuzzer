@@ -1496,6 +1496,8 @@ class x86UnicornVpecAllGP(X86UnicornVspecOps, X86NonCanonicalAddress):
             else:
                 model.curr_mem_store = (address, size)
             model._speculate_fault(6)
+            X86FaultModelAbstract.trace_mem_access(emulator, access, address, size, value, model)
+            return
         X86UnicornVspecOps.trace_mem_access(emulator, access, address, size, value, model)
 
     @staticmethod

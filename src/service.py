@@ -338,6 +338,18 @@ class Logger:
 
         print(f"ROLLBACK to 0x{address - base:x}")
 
+    def dbg_model_taints(self, hash, reg_taints, mem_taints):
+        if not __debug__:
+            return
+
+        if not self.dbg_model:
+            return
+
+        print(f"  > observation hash: {hash}")
+        print(f"  > reg taints: {reg_taints}")
+        print(f"  > mem taints: {mem_taints}")
+        print('\n')
+
     # ==============================================================================================
     # Coverage
     def dbg_report_coverage(self, round_id, msg):

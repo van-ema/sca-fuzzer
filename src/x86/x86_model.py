@@ -17,7 +17,7 @@ from interfaces import Input, FlagsOperand, RegisterOperand, MemoryOperand, Agen
 from model import UnicornModel, UnicornTracer, UnicornSpec, UnicornSeq, UnicornBpas, \
     BaseTaintTracker
 from x86.x86_target_desc import X86UnicornTargetDesc, X86TargetDesc
-from service import UnreachableCode
+from service import UnreachableCode, LOGGER
 
 FLAGS_CF = 0b000000000001
 FLAGS_PF = 0b000000000100
@@ -935,6 +935,7 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
             observation_list.sort()
             # print('leaking observation', observation_list)
             observation_hash = hash(tuple(observation_list))
+            LOGGER.dbg_model_taints(observation_hash, model.reg_taints, model.mem_taints)
             # just append hash to trace, don't do normal memory access
             assert isinstance(model.tracer, UnicornTracer)
             model.tracer.add_dependencies_to_trace(address, observation_hash, model)

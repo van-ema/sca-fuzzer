@@ -8,6 +8,7 @@ import abc
 import math
 import re
 import random
+import copy
 from typing import List, Dict, Set, Optional, Tuple
 from subprocess import run
 
@@ -764,12 +765,13 @@ class X86PatchUndefinedResultPass(Pass):
         Bit Scan instructions give an undefined result when the source operand is zero.
         To avoid it, set the most significant bit.
         """
-        source = inst.operands[1]
+        source = copy.deepcopy(inst.operands[1])
         mask = bin(1 << (source.width - 1))
         mask_size = source.width
         if source.width in [64, 32]:
             mask = "0b1000000000000000000000000000000"
             mask_size = 32
+        source.dest = True
         apply_mask = Instruction("OR", True) \
             .add_op(source) \
             .add_op(ImmediateOperand(mask, mask_size)) \

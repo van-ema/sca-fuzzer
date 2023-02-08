@@ -621,6 +621,7 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         self.curr_dest_regs = []
         self.curr_dest_regs_sizes = {}
         self.curr_mem_load = (-1, -1)
+        self.curr_mem_store = (-1, -1)
         self.curr_taint = set()
         self.curr_src_tainted = False
         assert len(self.reg_taints) == 0
@@ -776,9 +777,6 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         """
         assert isinstance(model, X86UnicornVspecOps)
 
-        # print('current taints:', model.reg_taints, model.mem_taints)
-        # print('current instruction:', model.current_instruction)
-
         # reset observation set and src/dest registers
         # this must happen before we check if we can skip, otherwise trace_mem_access might
         # use old values
@@ -793,6 +791,10 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         # track taints only after faults with non-empty taints
         if not model.in_speculation or (not model.reg_taints and not model.mem_taints):
             return
+
+        if LOGGER.dbg_model:
+            print('1. current taints:', model.reg_taints, model.mem_taints)
+            print('1. current instruction:', model.current_instruction)
 
         src_regs = set()
         mem_src_regs = set()
@@ -875,6 +877,16 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         model.curr_taint, model.curr_src_tainted = model.assemble_reg_values(src_regs)
         model.update_reg_taints()
 
+        if LOGGER.dbg_model:
+            print('2. current taints:', model.reg_taints, model.mem_taints)
+            print('2. current instruction:', model.current_instruction)
+            model.curr_observation = {model.full_input_taint}
+            observation_list = list(model.curr_observation)
+            observation_list.sort()
+            # print('leaking observation', observation_list)
+            observation_hash = hash(tuple(observation_list))
+            print(f">>> input_hash={model.input_hash} observation_hash={observation_hash}")
+
     @staticmethod
     def trace_mem_access(emulator: Uc, access: int, address: int, size: int, value: int,
                          model: UnicornModel) -> None:
@@ -883,8 +895,12 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         # remember last address and size in case of exception
         if access != UC_MEM_WRITE:
             model.curr_mem_load = (address, size)
+            if LOGGER.dbg_model:
+                print(f"Load! {model.curr_mem_load}")
         else:
             model.curr_mem_store = (address, size)
+            if LOGGER.dbg_model:
+                print(f"Store! {model.curr_mem_store}")
 
         if not model.in_speculation:
             X86FaultModelAbstract.trace_mem_access(emulator, access, address, size, value, model)
@@ -894,14 +910,20 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
 
         if access != UC_MEM_WRITE:
             # for loads, check if address is tainted
-            # TODO: strictly speaking I think we should test if any address in the range of
-            # address+size is tainted
-            if address in model.mem_taints or model.whole_memory_tainted:
+            # Test if any address in the range of address+size is tainted
+            is_tainted:bool = False
+            taints = set()
+            for i in range(size):
+                if (address+i) in model.mem_taints:
+                    is_tainted = True
+                    taints.update(model.mem_taints[address+i])
+
+            if is_tainted or model.whole_memory_tainted:
                 # add address taint to current taint
                 if model.whole_memory_tainted:
                     model.curr_taint.add(model.full_input_taint)
                 else:
-                    model.curr_taint.update(model.mem_taints[address])
+                    model.curr_taint.update(taints)
                 # remember that instruction used tainted src value
                 model.curr_src_tainted = True
                 # update taint of dest registers with address taint
@@ -929,13 +951,15 @@ class X86UnicornVspecOps(X86FaultModelAbstract):
         # check if the memory access creates a tainted observation
         if model.curr_observation:
             # if current observation contains full architectural state info, then only leak the hash
-            if (None, None, model.input_hash) in model.curr_observation:
+            if model.full_input_taint in model.curr_observation:
                 model.curr_observation = {model.full_input_taint}
             observation_list = list(model.curr_observation)
             observation_list.sort()
             # print('leaking observation', observation_list)
             observation_hash = hash(tuple(observation_list))
-            LOGGER.dbg_model_taints(observation_hash, model.reg_taints, model.mem_taints)
+            if LOGGER.dbg_model:
+                print(f"observation_list={observation_list}")
+            # LOGGER.dbg_model_taints(observation_hash, modelz.reg_taints, model.mem_taints)
             # just append hash to trace, don't do normal memory access
             assert isinstance(model.tracer, UnicornTracer)
             model.tracer.add_dependencies_to_trace(address, observation_hash, model)
@@ -1053,6 +1077,8 @@ class X86UnicornVspecAll(X86UnicornVspecOps):
         # only collect new taints if none of the src operands in the faulting instruction are
         # tainted if they are, the taints have been propagated correctly already,
         # so just ignore fault
+        if LOGGER.dbg_model:
+            print(f"curr_src_tainted={self.curr_src_tainted}")
         if not self.curr_src_tainted:
 
             for op in self.current_instruction.get_all_operands():
@@ -1062,9 +1088,13 @@ class X86UnicornVspecAll(X86UnicornVspecOps):
                 elif isinstance(op, FlagsOperand):
                     self.curr_dest_regs.extend(op.get_write_flags())
 
+            if LOGGER.dbg_model:
+                print(f"has write? {self.current_instruction.has_write()}")
             if self.current_instruction.has_write():
                 address = self.curr_mem_store[0]
                 size = self.curr_mem_store[1]
+                if LOGGER.dbg_model:
+                    print(f"store:{address}({size})")
                 for i in range(size):
                     self.mem_taints[address + i] = {self.full_input_taint}
 
@@ -1072,6 +1102,10 @@ class X86UnicornVspecAll(X86UnicornVspecOps):
             for reg in self.curr_dest_regs:
                 self.reg_taints[reg] = {self.full_input_taint}
 
+        if LOGGER.dbg_model:
+            print("######### Speculate fault ###########")
+            print(f"{self.mem_taints}")
+            print(f"{self.reg_taints}")
         return self.get_next_instruction()
 
 
@@ -1105,6 +1139,10 @@ class X86UnicornVspecAllMemoryFaults(X86UnicornVspecAll):
         elif model.pending_re_execution:
             model.pending_re_execution = False
             model.pending_restore_protection = True
+            if LOGGER.dbg_model:
+                print(f"reg taints {model.reg_taints}")
+                print(f"mem taints {model.mem_taints}")
+            return
         X86UnicornVspecAll.speculate_instruction(emulator, address, size, model)
 
     def get_next_instruction(self):

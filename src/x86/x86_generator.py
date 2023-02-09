@@ -495,13 +495,13 @@ class X86SandboxPass(Pass):
         The second corner case is 8-bit division, when the divisor is the AX register alone.
         Here the instrumentation become too complicated, and we simply set AX to 1.
         """
-        divisor = inst.operands[0]
+        divisor = copy.deepcopy(inst.operands[0])
 
         # TODO: remove me - avoids a certain violation
         if divisor.width == 64 and CONF.x86_disable_div64:  # type: ignore
             parent.delete(inst)
             return
-
+        divisor.dest = True
         if 'DE-zero' not in CONF.permitted_faults:
             # Prevent div by zero
             instrumentation = Instruction("OR", True) \
@@ -558,7 +558,7 @@ class X86SandboxPass(Pass):
             # no need for sandboxing
             return
 
-        offset = inst.operands[1]
+        offset = copy.deepcopy(inst.operands[1])
         if isinstance(offset, ImmediateOperand):
             # The offset is an immediate
             # Simply replace it with a smaller value
@@ -568,6 +568,7 @@ class X86SandboxPass(Pass):
         # The offset is in a register
         # Mask its upper bits to reduce the stored value to at most 7
         if address.value != offset.value:
+            offset.dest =  True
             apply_mask = Instruction("AND", True) \
                 .add_op(offset) \
                 .add_op(ImmediateOperand(self.mask_3bits, 8)) \

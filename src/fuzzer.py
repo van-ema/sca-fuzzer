@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 from copy import copy
+import random
 
 import factory
 from interfaces import CTrace, HTrace, Input, InputTaint, EquivalenceClass, TestCase, Generator, \
@@ -74,6 +75,7 @@ class Fuzzer:
         for i in range(num_test_cases):
             LOGGER.fuzzer_start_round(i)
             LOGGER.dbg_report_coverage(i, self.coverage.get_brief())
+            random.seed(CONF.program_generator_seed + i)
 
             # Generate a test case
             test_case: TestCase
@@ -176,6 +178,10 @@ class Fuzzer:
         else:
             # All violations were cleared by priming.
             return None
+
+        # Violation survived priming. Report it       
+        for m in violation.measurements:
+            m.input_.save(f"input{m.input_id}.bin")
 
         # Violation survived priming. Report it
         return violation
